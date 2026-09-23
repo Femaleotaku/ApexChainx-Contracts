@@ -129,6 +129,10 @@ test("mirrored constants match the values the contract reported", () => {
   assert.equal(MAX_HISTORY_SIZE, FIXTURE.constants.maxHistorySize);
   assert.equal(RESULT_SCHEMA_VERSION, FIXTURE.constants.resultSchemaVersion);
   assert.equal(RESULT_FIELD_COUNT, FIXTURE.constants.resultFieldCount);
+
+  // #606 – the contract reports the cheap, cached config count; it must match
+  // the canonical severity vocabulary we know about on the TS side.
+  assert.equal(CANONICAL_SEVERITIES.length, FIXTURE.constants.configCount);
 });
 
 test("the result symbol vocabulary matches the contract's schema", () => {

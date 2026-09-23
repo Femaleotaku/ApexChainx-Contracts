@@ -500,6 +500,9 @@ fn generate_ts_parity_fixtures() {
         ("resultFieldCount", crate::RESULT_SCHEMA_FIELD_COUNT.to_string()),
         ("historyEntries", HISTORY_ENTRIES.to_string()),
         ("detailedHistoryEntries", DETAILED_HISTORY_ENTRIES.to_string()),
+        // #606 – cheap config count is part of the parity surface now, because
+        // backends poll it to detect config drift without materializing the map.
+        ("configCount", client.get_config_count().to_string()),
     ]);
 
     // ── Symbol vocabulary, verified against the contract's own schema ──────

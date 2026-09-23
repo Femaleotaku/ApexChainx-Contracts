@@ -7,9 +7,9 @@
 use soroban_sdk::{Env, Map, Symbol, Vec};
 
 use crate::{
-    config_freeze, config_metadata, SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError, CONFIG_KEY,
-    CONFIG_SNAPSHOT_SCHEMA_VERSION, CUSTOM_CONFIG_KEY, EVENT_CONFIG_REM, EVENT_CONFIG_UPD, EVENT_SEV_ADD,
-    EVENT_SEV_UPD, EVENT_VERSION,
+    config_freeze, config_metadata, SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError, CONFIG_COUNT_KEY,
+    CONFIG_KEY, CONFIG_SNAPSHOT_SCHEMA_VERSION, CUSTOM_CONFIG_KEY, EVENT_CONFIG_REM, EVENT_CONFIG_UPD,
+    EVENT_SEV_ADD, EVENT_SEV_UPD, EVENT_VERSION,
 };
 
 /// Sets the SLA configuration for a given severity level.
@@ -55,6 +55,11 @@ pub fn set_config(
         },
     );
     env.storage().instance().set(&CONFIG_KEY, &configs);
+
+    // #606 – keep the cached config count correct on every config write.
+    env.storage()
+        .instance()
+        .set(&CONFIG_COUNT_KEY, &configs.len());
 
     config_metadata::record_config_update(env);
 

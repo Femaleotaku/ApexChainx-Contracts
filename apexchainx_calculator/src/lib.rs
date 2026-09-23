@@ -151,6 +151,10 @@ pub(crate) const PENDING_OP_TS_KEY: Symbol = symbol_short!("POPTS");
 /// Map of severity -> SLAConfig for all configured severity levels.
 pub(crate) const CONFIG_KEY: Symbol = symbol_short!("CONFIG");
 
+/// Cached length of the `CONFIG_KEY` map, so `get_config_count` stays O(1)
+/// instead of deserializing every severity config on each read. (#606)
+pub(crate) const CONFIG_COUNT_KEY: Symbol = symbol_short!("CFGCNT");
+
 /// Map of severity -> SLAConfig for admin-defined custom severity levels,
 /// distinct from the four canonical entries (critical/high/medium/low). (#93)
 pub(crate) const CUSTOM_CONFIG_KEY: Symbol = symbol_short!("CUSTCFG");
@@ -1287,6 +1291,8 @@ impl SLACalculatorContract {
         );
 
         env.storage().instance().set(&CONFIG_KEY, &configs);
+        // #606 – cache the config count so `get_config_count` is O(1).
+        Self::write_config_count(&env, &configs);
         // #455 – Seed CUSTOM_CONFIG_KEY so fresh and migrated contracts
         // have the same instance-storage key layout.
         env.storage()
@@ -1386,6 +1392,16 @@ impl SLACalculatorContract {
                 },
             );
             inst.set(&CONFIG_KEY, &configs);
+            inst.set(&CONFIG_COUNT_KEY, &configs.len());
+        }
+
+        // #606 – backfill the cached config count for contracts migrated from
+        // a schema that predates the key. One-time O(1) read after the map is
+        // already deserialized here; the hot read path stays O(1).
+        if !inst.has(&CONFIG_COUNT_KEY) {
+            if let Some(configs) = inst.get::<Map<Symbol, SLAConfig>>(&CONFIG_KEY) {
+                inst.set(&CONFIG_COUNT_KEY, &configs.len());
+            }
         }
 
         if !inst.has(&CUSTOM_CONFIG_KEY) {
@@ -1721,6 +1737,9 @@ impl SLACalculatorContract {
             },
         );
         env.storage().instance().set(&CONFIG_KEY, &configs);
+
+        // #606 – keep the cached config count correct on every config write.
+        Self::write_config_count(&env, &configs);
 
         // Issue #4 – stamp the ledger sequence of the most recent config
         // update so backends can detect when their cached configuration is
@@ -3597,12 +3616,29 @@ impl SLACalculatorContract {
     /// Off-chain consumers can inspect retention state without fetching the full map.
     pub fn get_config_count(env: Env) -> Result<u32, SLAError> {
         Self::check_version(&env)?;
+        if let Some(count) = env.storage().instance().get(&CONFIG_COUNT_KEY) {
+            return Ok(count);
+        }
+        // Legacy fallback: contracts that predate the cached count. Bounded to a
+        // single deserialization on first read; every write path now maintains
+        // the counter, so freshly-initialized contracts take the O(1) path. (#606)
         let configs: Map<Symbol, SLAConfig> = env
             .storage()
             .instance()
             .get(&CONFIG_KEY)
             .ok_or(SLAError::NotInitialized)?;
         Ok(configs.len())
+    }
+
+    /// Keeps the `CONFIG_COUNT_KEY` cache consistent with the canonical config
+    /// map. Must be called on every write to `CONFIG_KEY`. (#606)
+    pub(crate) fn write_config_count(
+        env: &Env,
+        configs: &Map<Symbol, SLAConfig>,
+    ) {
+        env.storage()
+            .instance()
+            .set(&CONFIG_COUNT_KEY, &configs.len());
     }
 
     /// Returns the current storage schema version so off-chain consumers can
