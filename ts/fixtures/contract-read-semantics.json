@@ -9,7 +9,8 @@
     "resultSchemaVersion": 1,
     "resultFieldCount": 9,
     "historyEntries": 250,
-    "detailedHistoryEntries": 28
+    "detailedHistoryEntries": 28,
+    "configCount": 4
   },
   "symbols": {
     "status.met": "met",

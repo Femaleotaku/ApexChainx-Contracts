@@ -4018,6 +4018,41 @@ fn test_storage_growth_config_size_is_fixed() {
     assert_eq!(client.get_config_count(), 4, "Config map must stay at 4 entries");
 }
 
+/// #606 – `get_config_count` is served from the cached `CONFIG_COUNT_KEY`
+/// counter, so it reads a single storage slot (O(1)) instead of materializing
+/// the whole config map, and the cache tracks the live map across writes.
+#[test]
+fn test_get_config_count_is_cached_and_tracks_updates() {
+    let (_env, client, actors) = setup();
+
+    // Fresh contract: the counter is seeded by `initialize` alongside the map.
+    assert_eq!(
+        client.get_config_count(),
+        4,
+        "initial count must report the four canonical tiers"
+    );
+    let snapshot = client.get_config_snapshot();
+    assert_eq!(
+        snapshot.entries.len(),
+        client.get_config_count(),
+        "cached count must match the live config snapshot"
+    );
+
+    // Update an existing tier: count unchanged, cache stays consistent.
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
+    assert_eq!(client.get_config_count(), 4);
+
+    // Repeated updates on different tiers never drift the cached counter.
+    for _ in 0..10u32 {
+        client.set_config(&actors.admin, &symbol_short!("high"), &30, &50, &750);
+        client.set_config(&actors.admin, &symbol_short!("medium"), &60, &25, &750);
+        client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &600);
+    }
+    let updated = client.get_config_snapshot();
+    assert_eq!(updated.entries.len(), 4);
+    assert_eq!(client.get_config_count(), 4);
+}
+
 #[test]
 fn test_storage_growth_prune_by_age_bounds_history() {
     let env = Env::default();
