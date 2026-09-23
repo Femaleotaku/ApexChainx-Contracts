@@ -1,64 +1,59 @@
-# Cross-language coverage matrix
+# Cross-Language Coverage Matrix (#632)
 
-> **#632** – Femaleotaku/issue-606-632 · adds a cross-language coverage report so
-> gaps between the Rust contract, the TypeScript parity layer and the off-chain
-> regression suite are CI-visible instead of silently drifting.
+> **Status:** Active
+> **Last audit:** February 2026 cross-language sweep (#632 / issue-606-632)
+> **Owner:** `offchain/coverageMatrix.ts` (single source of truth for CI)
 
-## What the matrix covers
+The ApexChainx calculus contract is consumed from four surfaces that live in
+different languages/registries. They must describe the **same** behaviour, or a
+consumer in one language drifts from the contract that another language tested.
 
-The ApexChainx calculator is consumed from four different surfaces that must
-stay in step:
+This document is the human-readable half of the coverage gate; the machine half
+is `offchain/coverageMatrix.ts`, which is wired into `npm run test:offchain` so
+a missing required surface fails the offchain job in CI.
 
-| Surface | What lives here |
-|---------|-----------------|
-| `rust`  | The Soroban contract (`apexchainx_calculator/src/*`) and its in-repo tests. |
-| `ts`    | The TypeScript read helpers, their parity tests and the generated constants. |
-| `parity`| The fixture-driven cross-language parity tests (`ts/parity/*`) and the JSON read-semantics fixture. |
-| `offchain` | Committed off-chain regression/consistency scripts (`offchain/*`) that never touch the ledger. |
+## Surfaces
 
-Every behaviour row in `offchain/coverageMatrix.ts` declares which surfaces are
-**required** to carry a live artifact hearth. The checker (`test:offchain`) then:
+| Surface | What lives there | Required for |
+|---------|------------------|--------------|
+| `rust`  | Soroban contract implementation + in-repo contract tests (`apexchainx_calculator/src/`) | the authoritative behaviour |
+| `ts`    | TS parity helpers/tests (`tests/*.test.ts`, `ts/parity/*`) that re-run on-chain reads off-ledger | every behaviour that must stay usable from TS |
+| `parity` | The cross-language parity fixtures (`ts/fixtures/contract-read-semantics.json`) shared verbatim by the Rust fixture generator and the TS parity suite | every value the contract reports |
+| `offchain` | Scripts that run fully off-ledger (`offchain/*`) to bound cost/size regressions | cost-bound budgets and the matrix itself |
 
-1. Resolves each required path from the repo root.
-2. Fails the offchain job if any required surface has no on-disk artifact.
-3. Re-reads the committed parity fixture and compares the contract-reported
-   cached `configCount` (#606) against the canonical severity vocabulary the
-   matrix knows – so the report cannot regress into a stale list of filenames.
+## Matrix rows (subset)
 
-## What "CI-visible gap" means here
+| Row | Behaviour | rust | ts | parity | offchain |
+|-----|-----------|:----:|:--:|:------:|:--------:|
+| #606 | O(1) cached `get_config_count` read | ✓ | ✓ | ✓ | — |
+| #606 value | fixture `constants.configCount` == severity vocabulary size | ✓ | ✓ | ✓ | ✓ |
+| #632 | cross-language coverage gate (this doc + checker) | — | ✓ | — | ✓ |
+| SC-W5-027 | Event-size regression budget | ✓ | — | — | ✓ |
+| SC-016 | Read-cost regression budget | ✓ | ✓ | ✓ | ✓ |
+| SC-W5-029 | Governance state/event consistency | ✓ | ✓ | — | ✓ |
 
-`package.json` wires the coverage matrix into the offchain job:
+> ✓ = live artifact committed; — = not required.
+> The matrix refuses to go green on stale-but-present files: the `#606 value`
+> row also re-reads the committed parity fixture and requires its `configCount`
+> to equal the number of `severity.*` symbols the fixture itself defines.
 
-```bash
-"test:offchain": "tsx offchain/eventSizeRegression.ts && ... && tsx offchain/coverageMatrix.ts"
-```
+## Why a single file exists instead of per-language docs
 
-Because the matrix exits non-zero when a required surface is missing, a change
-that removes or renames a parity artifact (while leaving the TS side in sync)
-fails CI instead of shipping a silent cross-language gap.
+A per-language doc can drift in each repo. One matrix (this doc + the TS
+checker) is the single cross-referenced artifact: the Rust side generates the
+parity fixture, the TS parity suite consumes it, and the offchain checker
+verifies both still agree with the matrix — every time `npm run test:offchain`
+runs in CI.
 
-## Rows in the committed matrix
+## Extending the matrix
 
-| ID | Feature | Required surfaces |
-|----|---------|-------------------|
-| #606 | O(1) cached `get_config_count` (rust + ts + parity rows live) | rust, ts, parity |
-| #604 | Severity vocabulary mirrored on the TS side | rust, ts |
-| #605 | Read semantics (pagination, history paging, result schema version) | rust, ts, parity |
-| SC-018 | Auth/role matrix parity | rust, ts |
-| SC-W5-027 | Read-cost regression budget | rust, offchain |
-| SC-016 | Event-size regression budget | rust, offchain |
-| SC-W5-029 | Severity symbol mapping parity | rust, ts |
-| SC-010 | Governance snapshot/state consistency | rust, ts |
-| SC-017 | Detailed-history parity fixture shape | rust, ts |
+1. Add a row to `offchain/coverageMatrix.ts` (required surfaces + the committed
+   paths that must carry the behaviour).
+2. Add the matching human row above.
+3. Wire any new required surface's path into a real committed file, or the
+   offchain job fails.
 
-`#606` is the only value-checked row: `configCount` read back from the parity
-fixture must equal the number of committed severity symbols, which is exactly
-the O(1) surface #606 introduced.
-
-## Running it locally
-
-```bash
-npm run test:offchain   # includes the coverage matrix gate
-```
-
-A healthy repo prints each row with `✓` on every required surface and exits 0.
+The value-level tie-in is the important part: paths are checked for existence,
+**and** the `#606` value row checks the fixture's `constants.configCount`
+against the fixture's own severity vocabulary, so the matrix cannot rot into
+"files exist" — it has to agree with what the contract actually reported.
